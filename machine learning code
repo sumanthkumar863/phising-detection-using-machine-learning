@@ -1,1 +1,220 @@
+from google.colab import drive
+drive.mount('/content/drive')
+!pip install selenium
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import plotly.express as px
+import time
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix
+from nltk.tokenize import RegexpTokenizer
+from nltk.stem.snowball import SnowballStemmer
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.pipeline import make_pipeline
+from PIL import Image
+from wordcloud import WordCloud, STOPWORDS, ImageColorGenerator
+from bs4 import BeautifulSoup
+from selenium import webdriver
+import networkx as nx
+import pickle
+import warnings
+warnings.filterwarnings('ignore')
+# the dataset
+phish_data = pd.read_csv('/content/drive/MyDrive/phising detection/phishing_site_urls (1).csv')
+phish_data.head()
+phish_data.tail()
+phish_data.info()
+phish_data.isnull().sum()
+label_counts = pd.DataFrame(phish_data.Label.value_counts())
+# Rename the column to 'Label' for Plotly Express compatibility
+label_counts = label_counts.reset_index()
+label_counts.columns = ['Label', 'Count']
 
+# Create the bar plot
+fig = px.bar(label_counts, x='Label', y='Count', title='Distribution of Phishing Labels')
+fig.show()
+tokenizer = RegexpTokenizer(r'[A-Za-z]+')
+phish_data.URL[0]
+tokenizer.tokenize(phish_data.URL[0]) # using first row
+print('Getting words tokenized ...')
+t0= time.perf_counter()
+phish_data['text_tokenized'] = phish_data.URL.map(lambda t: tokenizer.tokenize(t))
+t1 = time.perf_counter() - t0
+print('Time taken',t1 ,'sec')
+phish_data.sample(5)
+stemmer = SnowballStemmer("english")
+phish_data.sample(5)
+print('Getting joiningwords ...')
+t0= time.perf_counter()
+phish_data['text_sent'] = phish_data['text_stemmed'].map(lambda l: ' '.join(l))
+t1= time.perf_counter() - t0
+print('Time taken',t1 ,'sec')
+phish_data.sample(5)
+#sliceing classes
+bad_sites = phish_data[phish_data.Label == 'bad']
+good_sites = phish_data[phish_data.Label == 'good']
+good_sites.head()
+def plot_wordcloud(text, mask=None, max_words=400, max_font_size=120, figure_size=(24.0,16.0),
+                   title = None, title_size=40, image_color=False):
+    stopwords = set(STOPWORDS)
+    more_stopwords = {'com','http'}
+    stopwords = stopwords.union(more_stopwords)
+
+    wordcloud = WordCloud(background_color='white',
+                    stopwords = stopwords,
+                    max_words = max_words,
+                    max_font_size = max_font_size,
+                    random_state = 42,
+                    mask = mask)
+    wordcloud.generate(text)
+
+    plt.figure(figsize=figure_size)
+    if image_color:
+        image_colors = ImageColorGenerator(mask);
+        plt.imshow(wordcloud.recolor(color_func=image_colors), interpolation="bilinear");
+        plt.title(title, fontdict={'size': title_size,
+                                  'verticalalignment': 'bottom'})
+    else:
+        plt.imshow(wordcloud);
+        plt.title(title, fontdict={'size': title_size, 'color': 'green',
+                                  'verticalalignment': 'bottom'})
+    plt.axis('off');
+    plt.tight_layout()
+d = '../input/masks/masks-wordclouds/'
+data = good_sites.text_sent
+data.reset_index(drop=True, inplace=True)
+data = bad_sites.text_sent
+data.reset_index(drop=True, inplace=True)
+
+cv = CountVectorizer()
+help(CountVectorizer())
+feature = cv.fit_transform(phish_data.text_sent)
+feature[:5].toarray()
+trainX, testX, trainY, testY = train_test_split(feature, phish_data.Label)
+
+lr = LogisticRegression()
+lr.fit(trainX,trainY)
+lr.score(testX,testY)
+Scores_ml = {}
+Scores_ml['Logistic Regression'] = np.round(lr.score(testX,testY),2)
+print('Training Accuracy :',lr.score(trainX,trainY))
+print('Testing Accuracy :',lr.score(testX,testY))
+con_mat = pd.DataFrame(confusion_matrix(lr.predict(testX), testY),
+            columns = ['Predicted:Bad', 'Predicted:Good'],
+            index = ['Actual:Bad', 'Actual:Good'])
+
+
+print('\nCLASSIFICATION REPORT\n')
+print(classification_report(lr.predict(testX), testY,
+                            target_names =['Bad','Good']))
+
+print('\nCONFUSION MATRIX')
+plt.figure(figsize= (6,4))
+sns.heatmap(con_mat, annot = True,fmt='d',cmap="YlGnBu")
+
+mnb = MultinomialNB()
+mnb.fit(trainX,trainY)
+mnb.score(testX,testY)
+Scores_ml['MultinomialNB'] = np.round(mnb.score(testX,testY),2)
+print('Training Accuracy :',mnb.score(trainX,trainY))
+print('Testing Accuracy :',mnb.score(testX,testY))
+con_mat = pd.DataFrame(confusion_matrix(mnb.predict(testX), testY),
+            columns = ['Predicted:Bad', 'Predicted:Good'],
+            index = ['Actual:Bad', 'Actual:Good'])
+
+
+print('\nCLASSIFICATION REPORT\n')
+print(classification_report(mnb.predict(testX), testY,
+                            target_names =['Bad','Good']))
+
+print('\nCONFUSION MATRIX')
+plt.figure(figsize= (6,4))
+sns.heatmap(con_mat, annot = True,fmt='d',cmap="YlGnBu")
+import pandas as pd
+import seaborn as sns
+
+acc = pd.DataFrame.from_dict(Scores_ml, orient='index', columns=['Accuracy'])
+
+sns.set_style('darkgrid')
+
+sns.barplot(x=acc.index, y=acc['Accuracy'])
+pipeline_ls = make_pipeline(CountVectorizer(tokenizer = RegexpTokenizer(r'[A-Za-z]+').tokenize,stop_words='english'), LogisticRegression())
+
+trainX, testX, trainY, testY = train_test_split(phish_data.URL, phish_data.Label)
+pipeline_ls.fit(trainX,trainY)
+pipeline_ls.score(testX,testY)
+print('Training Accuracy :',pipeline_ls.score(trainX,trainY))
+print('Testing Accuracy :',pipeline_ls.score(testX,testY))
+con_mat = pd.DataFrame(confusion_matrix(pipeline_ls.predict(testX), testY),
+            columns = ['Predicted:Bad', 'Predicted:Good'],
+            index = ['Actual:Bad', 'Actual:Good'])
+
+
+print('\nCLASSIFICATION REPORT\n')
+print(classification_report(pipeline_ls.predict(testX), testY,
+                            target_names =['Bad','Good']))
+
+print('\nCONFUSION MATRIX')
+plt.figure(figsize= (6,4))
+sns.heatmap(con_mat, annot = True,fmt='d',cmap="YlGnBu")
+pickle.dump(pipeline_ls,open('phishing.pkl','wb'))
+loaded_model = pickle.load(open('phishing.pkl', 'rb'))
+result = loaded_model.score(testX,testY)
+print(result)
+predict_bad = ['placement.prt']
+predict_good = ['youtube.com/','youtube.com/watch?v=qI0TQJI3vdU','retailhellunderground.com/','restorevisioncenters.com/html/technology.html']
+loaded_model = pickle.load(open('phishing.pkl', 'rb'))
+result = loaded_model.predict(predict_bad)
+result2 = loaded_model.predict(predict_good)
+print(result)
+print("*"*30)
+print(result2)
+
+
+import joblib
+
+def load_model(file_path):
+    try:
+        model = joblib.load(file_path)
+        return model
+    except Exception as e:
+        print(f"Error loading model from {file_path}: {str(e)}")
+        return None
+
+def predict_phishing(model, input_data):
+    try:
+        # Ensure input_data is a 1D array (flatten it)
+        input_data = [input_data] if isinstance(input_data[0], list) else input_data
+        flattened_input = [item for sublist in input_data for item in sublist]
+
+        # Make a prediction
+        prediction = model.predict(flattened_input)
+        return prediction
+    except Exception as e:
+        print(f"Error making prediction: {str(e)}")
+        return None
+
+if __name__ == "__main__":
+    # Replace '/content/phishing.pkl' with the actual path to your saved model file
+    model_path = '/content/phishing.pkl'
+
+    # Load the model
+    phishing_model = load_model(model_path)
+
+    if phishing_model:
+        # Example input_data, replace it with your actual input data
+        sample_url_length = '50'  # Replace with the actual value as a string
+        sample_has_https = '1'    # Replace with the actual value as a string
+        sample_has_special_chars = '0'  # Replace with the actual value as a string
+
+        # Make a prediction
+        input_data = [sample_url_length, sample_has_https, sample_has_special_chars]
+        prediction = predict_phishing(phishing_model, input_data)
+
+        # Display the prediction
+        print(f"Phishing Prediction: {prediction}")
